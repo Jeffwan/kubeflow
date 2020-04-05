@@ -1,15 +1,10 @@
-# Copyright (c) Jupyter Development Team.
-# Distributed under the terms of the Modified BSD License.
-
-ARG BASE_IMAGE=tensorflow/tensorflow:1.13.2-py3-jupyter
+ARG BASE_IMAGE=763104351884.dkr.ecr.us-east-1.amazonaws.com/tensorflow-training:1.15.2-cpu-py36-ubuntu18.04
 
 FROM $BASE_IMAGE
 
-ARG TF_SERVING_VERSION=0.0.0
 ARG NB_USER=jovyan
 
 # TODO: User should be refactored instead of hard coded jovyan
-
 USER root
 
 ENV DEBIAN_FRONTEND noninteractive
@@ -56,17 +51,11 @@ RUN apt-get update && apt-get install -yq --no-install-recommends \
   && apt-get clean && \
   rm -rf /var/lib/apt/lists/*
 
-ENV DOCKER_CREDENTIAL_GCR_VERSION=1.4.3
-RUN curl -LO https://github.com/GoogleCloudPlatform/docker-credential-gcr/releases/download/v${DOCKER_CREDENTIAL_GCR_VERSION}/docker-credential-gcr_linux_amd64-${DOCKER_CREDENTIAL_GCR_VERSION}.tar.gz && \
-    tar -zxvf docker-credential-gcr_linux_amd64-${DOCKER_CREDENTIAL_GCR_VERSION}.tar.gz && \
-    mv docker-credential-gcr /usr/local/bin/docker-credential-gcr && \
-    rm docker-credential-gcr_linux_amd64-${DOCKER_CREDENTIAL_GCR_VERSION}.tar.gz && \
-    chmod +x /usr/local/bin/docker-credential-gcr
-
-# Install AWS CLI
-RUN curl "https://s3.amazonaws.com/aws-cli/awscli-bundle.zip" -o "/tmp/awscli-bundle.zip" && \
-    unzip /tmp/awscli-bundle.zip && ./awscli-bundle/install -i /usr/local/aws -b /usr/local/bin/aws && \
-    rm -rf ./awscli-bundle
+# Install kubectl client
+RUN echo "deb https://apt.kubernetes.io/ kubernetes-xenial main" | sudo tee -a /etc/apt/sources.list.d/kubernetes.list && \
+    curl https://packages.cloud.google.com/apt/doc/apt-key.gpg | apt-key add - && \
+    apt-get update && \
+    apt-get install -y kubectl
 
 RUN echo "en_US.UTF-8 UTF-8" > /etc/locale.gen && \
     locale-gen
@@ -82,12 +71,6 @@ RUN useradd -M -s /bin/bash -N -u $NB_UID $NB_USER && \
     chown -R ${NB_USER}:users /usr/local/bin && \
     mkdir -p $HOME
 
-RUN export CLOUD_SDK_REPO="cloud-sdk-$(lsb_release -c -s)" && \
-    echo "deb https://packages.cloud.google.com/apt $CLOUD_SDK_REPO main" > /etc/apt/sources.list.d/google-cloud-sdk.list && \
-    curl https://packages.cloud.google.com/apt/doc/apt-key.gpg | apt-key add - && \
-    apt-get update && \
-    apt-get install -y google-cloud-sdk kubectl
-
 # Install Tini - used as entrypoint for container
 RUN cd /tmp && \
     wget --quiet https://github.com/krallin/tini/releases/download/v0.18.0/tini && \
@@ -99,6 +82,10 @@ RUN cd /tmp && \
 # or otherwise adding new layers with RUN, chown, etc.
 # The image size can grow significantly.
 
+# Add EKS Kubeflow Workshop
+# TODO: Pin to tag or version in later version.
+RUN git clone https://github.com/aws-samples/eks-kubeflow-workshop.git $HOME
+
 # Install base python3 packages
 RUN pip3 --no-cache-dir install \
     jupyter-console==6.0.0 \
@@ -108,11 +95,8 @@ RUN pip3 --no-cache-dir install \
 
 COPY --chown=jovyan:users requirements.txt /tmp
 
-RUN docker-credential-gcr configure-docker && chown ${NB_USER}:users $HOME/.docker/config.json
-
 # Configure container startup
 EXPOSE 8888
 USER jovyan
 ENTRYPOINT ["tini", "--"]
 CMD ["sh","-c", "jupyter notebook --notebook-dir=/home/${NB_USER} --ip=0.0.0.0 --no-browser --allow-root --port=8888 --NotebookApp.token='' --NotebookApp.password='' --NotebookApp.allow_origin='*' --NotebookApp.base_url=${NB_PREFIX}"]
-
